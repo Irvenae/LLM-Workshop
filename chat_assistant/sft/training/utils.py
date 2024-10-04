@@ -99,21 +99,11 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
     return train_data, valid_data
 
 
-def create_and_prepare_model(args, data_args, training_args):
-    if args.use_unsloth:
-        from unsloth import FastLanguageModel
+def create_and_prepare_model(args, data_args, training_args): 
     bnb_config = None
     quant_storage_stype = None
     load_in_8bit = args.use_8bit_qunatization
     load_in_4bit = args.use_4bit_quantization
-
-    if (
-        torch.distributed.is_available()
-        and torch.distributed.is_initialized()
-        and torch.distributed.get_world_size() > 1
-        and args.use_unsloth
-    ):
-        raise NotImplementedError("Unsloth is not supported in distributed training")
 
     if args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
@@ -136,28 +126,20 @@ def create_and_prepare_model(args, data_args, training_args):
                 )
                 print("=" * 80)
 
-    if args.use_unsloth:
-        # Load model
-        model, _ = FastLanguageModel.from_pretrained(
-            model_name=args.model_name_or_path,
-            max_seq_length=data_args.max_seq_length,
-            dtype=None,
-            load_in_4bit=load_in_4bit,
-        )
-    else:
-        torch_dtype = quant_storage_stype if quant_storage_stype and quant_storage_stype.is_floating_point else torch.float32
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            load_in_8bit=load_in_8bit,
-            quantization_config=bnb_config,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-            torch_dtype=torch_dtype,
-        )
+    
+    torch_dtype = quant_storage_stype if quant_storage_stype and quant_storage_stype.is_floating_point else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        load_in_8bit=load_in_8bit,
+        quantization_config=bnb_config,
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+        torch_dtype=torch_dtype,
+    )
 
     peft_config = None
     chat_template = None
-    if args.use_peft_lora and not args.use_unsloth:
+    if args.use_peft_lora:
         peft_config = LoraConfig(
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
@@ -195,21 +177,6 @@ def create_and_prepare_model(args, data_args, training_args):
             args.model_name_or_path, trust_remote_code=True
         )
         tokenizer.pad_token = tokenizer.eos_token
-
-    if args.use_unsloth:
-        # Do model patching and add fast LoRA weights
-        model = FastLanguageModel.get_peft_model(
-            model,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            r=args.lora_r,
-            target_modules=args.lora_target_modules.split(",")
-            if args.lora_target_modules != "all-linear"
-            else args.lora_target_modules,
-            use_gradient_checkpointing=training_args.gradient_checkpointing,
-            random_state=training_args.seed,
-            max_seq_length=data_args.max_seq_length,
-        )
 
     return model, peft_config, tokenizer
 

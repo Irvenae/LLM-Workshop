@@ -95,11 +95,7 @@ class ModelArguments:
     use_reentrant: Optional[bool] = field(
         default=False,
         metadata={"help": "Gradient Checkpointing param. Refer the related docs"},
-    )
-    use_unsloth: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enables UnSloth for training."},
-    )
+    ) 
     use_loftq: Optional[bool] = field(
         default=False,
         metadata={"help": "Enables LoftQ init for the LoRA adapters when using QLoRA."},
@@ -342,9 +338,6 @@ def create_and_prepare_model(args, data_args, training_args):
     load_in_8bit = args.use_8bit_qunatization
     load_in_4bit = args.use_4bit_quantization
 
-    if args.use_unsloth:
-        from unsloth import FastLanguageModel
-
     if args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
 
@@ -371,28 +364,19 @@ def create_and_prepare_model(args, data_args, training_args):
             else "auto"
         )  # {"": 0}
 
-    if args.use_unsloth:
-        # Load model
-        model, _ = FastLanguageModel.from_pretrained(
-            model_name=args.model_name_or_path,
-            max_seq_length=data_args.max_seq_length,
-            dtype=None,
-            load_in_4bit=load_in_4bit,
-        )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            load_in_8bit=load_in_8bit,
-            quantization_config=bnb_config,
-            device_map=device_map,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-        )
+    
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        load_in_8bit=load_in_8bit,
+        quantization_config=bnb_config,
+        device_map=device_map,
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+    )
 
     if (
         (args.use_4bit_quantization or args.use_8bit_qunatization)
         and args.use_peft_lora
-        and not args.use_unsloth
     ):
         model = prepare_model_for_kbit_training(
             model,
@@ -400,7 +384,7 @@ def create_and_prepare_model(args, data_args, training_args):
             gradient_checkpointing_kwargs={"use_reentrant": model_args.use_reentrant},
         )
 
-    if args.use_peft_lora and not args.use_unsloth:
+    if args.use_peft_lora:
         peft_config = LoraConfig(
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
@@ -412,20 +396,7 @@ def create_and_prepare_model(args, data_args, training_args):
             else args.lora_target_modules,
         )
         model = get_peft_model(model, peft_config)
-    elif args.use_peft_lora and args.use_unsloth:
-        # Do model patching and add fast LoRA weights
-        model = FastLanguageModel.get_peft_model(
-            model,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            r=args.lora_r,
-            target_modules=args.lora_target_modules.split(",")
-            if args.lora_target_modules != "all-linear"
-            else args.lora_target_modules,
-            use_gradient_checkpointing=training_args.gradient_checkpointing,
-            random_state=training_args.seed,
-            max_seq_length=data_args.max_seq_length,
-        )
+
     return model
 
 
@@ -445,9 +416,7 @@ def main(model_args, data_args, training_args):
     model = create_and_prepare_model(model_args, data_args, training_args)
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
-    training_args.gradient_checkpointing = (
-        training_args.gradient_checkpointing and not model_args.use_unsloth
-    )
+    
     if training_args.gradient_checkpointing:
         training_args.gradient_checkpointing_kwargs = {
             "use_reentrant": model_args.use_reentrant

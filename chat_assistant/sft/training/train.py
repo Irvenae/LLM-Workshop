@@ -92,10 +92,6 @@ class ModelArguments:
         default=False,
         metadata={"help": "Gradient Checkpointing param. Refer the related docs"},
     )
-    use_unsloth: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enables UnSloth for training."},
-    )
     use_loftq: Optional[bool] = field(
         default=False,
         metadata={"help": "Enables LoftQ init for the LoRA adapters when using QLoRA."},
@@ -155,9 +151,7 @@ def main(model_args, data_args, training_args):
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
-    training_args.gradient_checkpointing = (
-        training_args.gradient_checkpointing and not model_args.use_unsloth
-    )
+    
     if training_args.gradient_checkpointing:
         training_args.gradient_checkpointing_kwargs = {
             "use_reentrant": model_args.use_reentrant
